@@ -1,0 +1,203 @@
+---
+title: "Analiza cen złota"
+author: "Jakub Borowiak"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message=FALSE, warning=FALSE)
+
+```
+
+# Podsumowanie
+
+Zostały wykonane obliczenia korelacji między cenami złota a różnymi wskaźnikami rozwoju gospodarczego na podstawie danych podzielonych na 4 pliki. Poniżej znajdują się wnioski na temat korelacji cen złota i poszczególnych atrybutów zamieszczonych w tych plikach.
+
+## S&P Composite
+Największą korelację widać pomiędzy ceną złota a CPI, wartość tych parametrów rośnie niemal współmiernie. Dużą korelację, natomiast odwrotną, widać pomiędzy ceną złota a parametrem long interest rate. Najmniejszą zależność z kolei można stwierdzić z parametrem real price.
+
+## Currency Exchange Rates
+Największa korelacja cen złota występuje tutaj z kursem dolara brunejskiego oraz chińskiego yuana. Warto mieć jednak na uwadze fakt, że dane dotyczące tych walut zawierają kilkurotnie więcej pustych wartości niż te na temat franka szwajcarskiego, zajmującego 3 miejsce pod względem korelacji.
+
+## World Development Indicators
+Do najsilniej związaych atrybutów z cenami złota należą:
+PKB na osobę, wartość importowanych dóbr, emisja CO2 z paliw stałych, wydatki oraz oszczędności.
+
+Podsumowując zestawienie korelacji z poszczególnych plików okazuje się, że największą jej wartością jest 0.9595459 dla dolara brunejskiego, a następnie 0.95241999 dla PKB na osobę. 
+
+## Regresor
+
+Dobór zmiennych do zbioru danych nastąpił na podstawie obliczonych wcześniej wartości korelacji z cenami złota, a także ilości wartości pustych z zbiorze początkowym. Wyznaczony zbiór treningowy stanowił 75% całego zbioru. Do wytrenowania regresora użyto algorytmu Random Forest. Niestety, części związanej z predykcją nie udało się doprowadzić do końca ze względu na problemy z instalacją bibliotek, zatem wnioski na ich temat nie mogły zostać wyciągnięte. 
+
+# Wykorzystane biblioteki
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(tidyr)
+library(knitr)
+```
+
+# Wczytywanie danych z plików
+
+```{r}
+curr_ex_rates <- read.csv("CurrencyExchangeRates.csv")
+gold_prices <- read.csv("Gold prices.csv")
+composite <- read.csv("S&P Composite.csv")
+wdi <- read_excel("World_Development_Indicators.xlsx", na="..")
+```
+
+# Czyszczenie danych
+
+Częścią przygotowania danych jest ujednolicenie formy ich przechowywania, aby łatwiej można było badać zależności między nimi. Badany okres został ograniczony do takiego, który jest we wszystkich plikach tj 1995-2017. Zostały również pominięte kolumny ze zbyt dużą ilością wartości NA. W danych dotyczących rozwoju gospodarczego wzięte zostały pod uwagę wskaźniki z całego świata, gdyż wydają się one być najbardziej reprezentatywne pod względem badania korelacji ze światowymi cenami złota. 
+```{r}
+composite <- composite %>% filter(as.integer(substr(Year, 1,4)) > 1994 & as.integer(substr(Year, 1,4)) < 2018) %>% 
+  mutate(Month = substr(Year, 6,7), Date=as.Date(Year), Year = substr(Year, 1,4))
+gold_prices <- gold_prices %>% filter(as.integer(substr(Date, 1,4)) > 1994 & as.integer(substr(Date, 1,4)) < 2018) %>% 
+  mutate(Month = substr(Date, 6,7), Year = substr(Date, 1,4)) %>% select(-c("USD..PM.", "GBP..PM.", "EURO..PM.", "EURO..AM.", "GBP..AM."))
+gold_prices$Date <- as.Date(gold_prices$Date)
+curr_ex_rates$Date <- as.Date(curr_ex_rates$Date)
+curr_ex_rates <- curr_ex_rates %>% filter(as.integer(substr(Date, 1,4)) > 1994 & as.integer(substr(Date, 1,4)) < 2018) 
+wdi <- wdi %>% filter(`Country Name` == "World") %>% gather("Year", "Index", -c("Country Name", "Country Code", "Series Name", "Series Code")) %>%  mutate(Year=substr(Year,1, 4))
+wdi <- wdi %>% filter(as.integer(wdi$Year) > 1994 & as.integer(wdi$Year) < 2018) 
+wdi_pom <- wdi %>% group_by(`Series Code`) %>% summarise(proce = sum(!is.na(Index))/(sum(is.na(Index))+sum(!is.na(Index)))) %>%
+  filter(proce > 0.9)
+wdi <- wdi %>% filter(`Series Code` %in% wdi_pom$`Series Code`) %>% select(-c("Series Code"))
+wdi <- wdi %>% spread("Series Name", "Index")
+```
+
+# Analiza wartości atrybutów
+## Gold Prices
+```{r echo=FALSE}
+kable(summary(gold_prices))
+```
+## Currency Exchange Rates
+```{r echo=FALSE}
+kable(summary(curr_ex_rates))
+```
+
+## World Development Indicators
+```{r echo=FALSE}
+kable(summary(wdi))
+```
+
+## S&P Composite
+```{r echo=FALSE}
+kable(summary(composite))
+```
+
+# Korelacje między zmiennymi
+
+Badanie korelacji między cenami złota a pozostałymi wskaźnikami gospodarczymi
+
+```{r echo=FALSE}
+gp_cer <- full_join(gold_prices, curr_ex_rates, by = "Date") %>% select(-c("Year", "Month", "Date"))
+gold_year <- gold_prices %>% group_by(Year) %>% summarise(USD..AM. = mean(USD..AM.))
+gp_wdi <- full_join(gold_year, wdi, by="Year") %>% select(-c("Year", "Country Name", "Country Code"))
+gp_comp <- full_join(gold_prices, composite, by = c("Month", "Year")) %>% select(-c("Month", "Year", "Date.x", "Date.y"))
+gp_comp_cor <- gp_comp %>% cor(use="pairwise.complete.obs")
+gp_comp_cor <- gp_comp_cor["USD..AM.", ]
+kable(gp_comp_cor)
+```
+
+Powyższe zestawienie przedstawia korelację między ceną złota a poszczególnymi parametrami zamieszczonymi w pliku S&P Composite.
+
+```{r echo=FALSE}
+gp_cer_cor <- gp_cer %>% cor(use="pairwise.complete.obs")
+gp_cer_cor <- gp_cer_cor["USD..AM.", ]
+kable(gp_cer_cor)
+```
+
+Powyższe Zestawienie prezentuje zależność pomiędzy cenami złota a poszczególnymi walutami.
+
+```{r echo=FALSE}
+gp_wdi_cor <- gp_wdi %>% cor(use="pairwise.complete.obs")
+gp_wdi_cor <- gp_wdi_cor["USD..AM.", ]
+kable(gp_wdi_cor)
+```
+Powyższa tabela potwierdza korelację cen złota z wieloma indeksami rozwoju gospodarczego. 
+
+# Zmiany wybranych atrybutów w czasie
+
+## Cena złota
+
+```{r echo=FALSE}
+ggplot(gold_prices, aes(x=Date, y=USD..AM.)) + geom_line()
+```
+
+Na początku badanego okresu cena wynosiła nieco więcej niż 300 dolarów. Szczyt osiągnęła  w okolicach światowego kryzysu finansowego w 2007-2008 roku, a od tego czasu spada.
+
+## Indeks cen konsumpcyjnych(CPI)
+
+```{r echo=FALSE}
+ggplot(composite, aes(x=Date, y=CPI)) + geom_line() + scale_x_date(date_breaks = "5 years")
+```
+
+CPI to wskaźnik silnie skorelowany z cenami złota. Widać wzrost jego wartości od początku okresu zbierania danych do osiągnięcia szczytu przez ceny złota. Wtedy wartość CPI również zaczęła spadać, jednak tendencja spadkowa odwróciła się szybciej niz ta w przypadku cen złota.
+
+## Kurs franka szwajcarskiego
+
+```{r echo=FALSE}
+ggplot(curr_ex_rates, aes(x=Date, y=Swiss.Franc)) + geom_line() + scale_x_date(date_breaks = "5 years")
+```
+
+Wartość franka szwajcarskiego(w stosunku do amerykańskiego dolara) spadała aż do 2003 roku, kiedy to frank był wart niemal 2 razy mniej niż dolar. Od tego czasu zależność ta odwróciła się, powodując, że w 2012 roku wartość franka przebiła dolara. Od tego czasu jednak zależność pomiędzy tymi walutami jest dość stabilna.
+
+## PKB na osobę
+
+```{r echo=FALSE}
+ggplot(wdi, aes(x=Year, y=`GDP per capita (current US$)`)) + geom_point() 
+```
+
+Całkowite światowe PKB po stagnacji w początkowym okresie, który jest badany zaliczyło gwałtowny, dwukrotny wzrost aż do roku 2011. Od tego czasu roczny wzrost PKB jest nieco mniejszy.
+
+## Procent populacji zamieszkującej wieś w społeczeństwie
+
+```{r echo=FALSE}
+ggplot(wdi, aes(x=Year, y=`Rural population (% of total population)`)) + geom_point() 
+```
+
+Procent populacji wiejskiej w społeczeństwie zalicza na świecie stabilny i znaczący spadek. W całym okresie badań od 1995 do 2017 procent ten spadł z 55 do 45.
+
+# Przewidywanie cen złota
+
+## Konstruowanie zbioru danych
+
+```{r echo=FALSE}
+wdi_pred <- wdi %>% select(Year, `CO2 emissions from solid fuel consumption (kt)`, `GDP per capita (current US$)`, `Goods imports (BoP, current US$)`, `Exports of goods and services (current US$)`, `CO2 emissions (kt)`, `Survival to age 65, female (% of cohort)`, `Total greenhouse gas emissions (kt of CO2 equivalent)`, `International tourism, expenditures (current US$)`)
+composite_pred <- composite %>% select(Year, Month, CPI, `Long.Interest.Rate`)
+ex_rates_pred <- curr_ex_rates %>% select(Date, `Brunei.Dollar`, `Chinese.Yuan`, `Swiss.Franc`)
+
+gp_ex_pred <- full_join(gold_prices, ex_rates_pred, by = "Date")
+gp_ex_comp_pred <- full_join(gp_ex_pred, composite_pred, by = c("Month", "Year"))
+full_pred <- full_join(gp_ex_comp_pred, wdi_pred, by = "Year") %>% select(-c("Date", "Month", "Year")) %>% drop_na()
+```
+
+## Podział zbioru i trening
+
+
+set.seed(23)
+inTraining <- 
+    createDataPartition(
+        y = full_pred$`USD..AM.`,
+        p = .75,
+        list = FALSE)
+training <- full_pred[ inTraining,]
+testing  <- full_pred[-inTraining,]
+ctrl <- trainControl(
+    method = "repeatedcv",
+    number = 2,
+    repeats = 5)
+set.seed(23)
+fit <- train(`USD..AM.` ~ .,
+             data = training,
+             method = "rf",
+             trControl = ctrl,
+             ntree = 10)
+
+pred <- predict(fit, newdata = testing)
+
